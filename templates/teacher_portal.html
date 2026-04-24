@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="teacher-portal-container fade-in">
+    <div class="portal-header">
+        <h2>Teacher Portal: {{ session.get('username') }}</h2>
+        <p>Manage your availability and view your personal timetable.</p>
+    </div>
+
+    <div class="availability-section">
+        <h3>My Availability & Schedule</h3>
+        <p class="subtitle">Click on a slot to toggle your availability. <span class="avail-indicator avail-true">Available</span> <span class="avail-indicator avail-false">Unavailable</span></p>
+
+        <div class="timetable-card">
+            <div class="table-responsive">
+                <table class="timetable-grid portal-grid">
+                    <thead>
+                        <tr>
+                            <th>Day / Slot</th>
+                            {% for slot in slots %}
+                            <th>{{ slot }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for day in days %}
+                        <tr>
+                            <td class="day-label">{{ day }}</td>
+                            {% for cell in grid[day] %}
+                            <td class="portal-cell {% if cell.is_available %}available-slot{% else %}unavailable-slot{% endif %}" data-day="{{ day }}" data-slot="{{ cell.slot }}">
+                                {% if cell.entry %}
+                                    <div class="assigned-entry">
+                                        <div class="entry-subject">{{ cell.entry.subject }}</div>
+                                        <div class="entry-class">{{ cell.entry.class }}</div>
+                                        <div class="entry-room">{{ cell.entry.room }}</div>
+                                    </div>
+                                {% else %}
+                                    <div class="free-slot-indicator">
+                                        <i class="fa-solid {% if cell.is_available %}fa-check{% else %}fa-times{% endif %}"></i>
+                                    </div>
+                                {% endif %}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+.teacher-portal-container { padding: 20px 0; }
+.portal-header h2 { font-weight: 700; color: #6b4c3b; }
+.portal-header p { color: #8b6a55; }
+.subtitle { font-size: 0.95rem; margin-bottom: 20px; }
+.avail-indicator { padding: 4px 10px; border-radius: 12px; font-size: 0.85rem; font-weight: 600; margin: 0 4px; display: inline-block; }
+.avail-indicator.avail-true { background: #e8f5e9; color: #2e7d32; box-shadow: 2px 2px 5px #d5cabd, -2px -2px 5px #ffffff; }
+.avail-indicator.avail-false { background: #ffebee; color: #c62828; box-shadow: inset 2px 2px 5px #d5cabd, inset -2px -2px 5px #ffffff; }
+
+.portal-grid { width: 100%; border-collapse: separate; border-spacing: 8px; }
+.portal-grid th { text-align: center; color: #6b4c3b; padding: 10px; }
+.portal-grid td { padding: 10px; text-align: center; vertical-align: middle; border-radius: 12px; transition: all 0.2s ease; }
+.day-label { font-weight: 700; color: #6b4c3b; background: transparent; box-shadow: none; }
+
+.portal-cell {
+    cursor: pointer;
+    min-width: 100px;
+    height: 80px;
+}
+
+.portal-cell.available-slot {
+    background: #f5eee7;
+    box-shadow: 5px 5px 10px #d5cabd, -5px -5px 10px #ffffff;
+}
+.portal-cell.available-slot:hover {
+    transform: translateY(-2px);
+}
+
+.portal-cell.unavailable-slot {
+    background: #e7ddd4;
+    box-shadow: inset 5px 5px 10px #d5cabd, inset -5px -5px 10px #ffffff;
+    opacity: 0.8;
+}
+
+.assigned-entry {
+    background: #6b4c3b;
+    color: white;
+    border-radius: 8px;
+    padding: 8px;
+    font-size: 0.85rem;
+    box-shadow: 3px 3px 6px #d5cabd, -3px -3px 6px #ffffff;
+}
+.entry-subject { font-weight: 700; }
+.entry-class { opacity: 0.9; }
+
+.free-slot-indicator i {
+    font-size: 1.5rem;
+    color: #8b6a55;
+    opacity: 0.5;
+}
+.available-slot .free-slot-indicator i { color: #4caf50; }
+.unavailable-slot .free-slot-indicator i { color: #f44336; }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const cells = document.querySelectorAll('.portal-cell');
+    
+    cells.forEach(cell => {
+        cell.addEventListener('click', async () => {
+            if (cell.querySelector('.assigned-entry') && cell.classList.contains('available-slot')) {
+                if (!confirm("You already have a class scheduled here. Are you sure you want to mark it as unavailable? This might cause conflicts in the next generation.")) {
+                    return;
+                }
+            }
+            
+            const day = cell.dataset.day;
+            const slot = cell.dataset.slot;
+            const isCurrentlyAvailable = cell.classList.contains('available-slot');
+            const newAvailability = !isCurrentlyAvailable;
+            
+            // Optimistic update
+            if (newAvailability) {
+                cell.classList.remove('unavailable-slot');
+                cell.classList.add('available-slot');
+                const icon = cell.querySelector('.free-slot-indicator i');
+                if (icon) { icon.classList.remove('fa-times'); icon.classList.add('fa-check'); }
+            } else {
+                cell.classList.remove('available-slot');
+                cell.classList.add('unavailable-slot');
+                const icon = cell.querySelector('.free-slot-indicator i');
+                if (icon) { icon.classList.remove('fa-check'); icon.classList.add('fa-times'); }
+            }
+            
+            try {
+                const response = await fetch('/update_availability', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        day: day,
+                        slot: slot,
+                        is_available: newAvailability
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.status !== 'success') {
+                    throw new Error(result.message);
+                }
+            } catch (err) {
+                console.error("Error updating availability", err);
+                // Revert
+                if (isCurrentlyAvailable) {
+                    cell.classList.remove('unavailable-slot');
+                    cell.classList.add('available-slot');
+                } else {
+                    cell.classList.remove('available-slot');
+                    cell.classList.add('unavailable-slot');
+                }
+                alert("Failed to update availability: " + err.message);
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+
+{% block title %}Data Management{% endblock %}
+
+{% block max_width %}1320px{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+    <h2 class="mb-1">{% if selected_section == 'classes' %}Class Data{% else %}Teacher Data{% endif %}</h2>
+    <div class="text-muted">{% if selected_section == 'classes' %}Manage class sections for timetable generation.{% else %}Add teacher assignments and subject data from one place.{% endif %}</div>
+</div>
+
+{% if selected_section != 'classes' %}
+<div class="section-card p-4 mb-4">
+    <div class="section-title">Teaching Assignments</div>
+    <div class="section-subtitle">Each row links one teacher to one subject, class, and session type.</div>
+
+    <form action="/add_teacher" method="POST" class="row g-3" id="teacherForm">
+        <input type="hidden" name="assignment_id" id="teacher_assignment_id">
+
+        <div class="col-md-3">
+            <input name="name" id="teacher_name" placeholder="Teacher Name" class="form-control" required>
+        </div>
+
+        <div class="col-md-2">
+            <input name="code" id="teacher_code" placeholder="Code" class="form-control" required>
+        </div>
+
+        <div class="col-md-3">
+            <input name="subject" id="teacher_subject" placeholder="Subject" class="form-control" required>
+        </div>
+
+        <div class="col-md-1">
+            <select name="year" id="teacher_year" class="form-select">
+                <option value="SE">SE</option>
+                <option value="TE">TE</option>
+                <option value="BE">BE</option>
+            </select>
+        </div>
+
+        <div class="col-md-1">
+            <select name="division" id="teacher_division" class="form-select">
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+            </select>
+        </div>
+
+        <div class="col-md-1">
+            <select name="type" id="teacher_type" class="form-select">
+                <option value="LEC">LEC</option>
+                <option value="LAB">LAB</option>
+            </select>
+        </div>
+
+        <div class="col-12 col-lg-3 d-flex gap-2">
+            <button type="submit" class="btn btn-brown w-100" id="teacherSubmitButton">Save Assignment</button>
+            <button type="button" class="btn btn-outline-secondary w-100" id="teacherCancelButton" onclick="resetTeacherForm()" style="display:none;">Cancel</button>
+        </div>
+    </form>
+</div>
+
+<div class="section-card p-4 mb-4">
+    <div class="section-title">Current Teaching Data</div>
+    <div class="table-wrapper">
+        <table class="table table-bordered table-hover text-center align-middle">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Code</th>
+                    <th>Subject</th>
+                    <th>Class</th>
+                    <th>Type</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for t in teachers %}
+                <tr>
+                    <td>{{ t[1] }}</td>
+                    <td>{{ t[2] }}</td>
+                    <td>{{ t[3] }}</td>
+                    <td>{{ t[4] ~ '-' ~ t[5] }}</td>
+                    <td>{{ t[6] }}</td>
+                    <td>
+                        <button
+                            type="button"
+                            class="btn btn-secondary btn-sm"
+                            onclick=`editTeacher({{ t[0] }}, {{ t[1] | tojson }}, {{ t[2] | tojson }}, {{ t[3] | tojson }}, {{ t[4] | tojson }}, {{ t[5] | tojson }}, {{ t[6] | tojson }})'
+                        >
+                            Edit
+                        </button>
+                        <a href="/delete_teacher/{{ t[0] }}" class="btn btn-danger btn-sm">Delete</a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6">No teaching records yet. Add one above.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if selected_section == 'classes' %}
+<div class="section-card p-4 mb-4">
+    <div class="section-title">Classroom Mapping</div>
+    <div class="section-subtitle">Map each class (year + division + type) to its preferred room for timetable generation.</div>
+
+    <form action="/save_class_section" method="POST" class="row g-3" id="sectionForm">
+        <input type="hidden" name="section_id" id="section_id">
+
+        <div class="col-md-3">
+            <input name="section_name" id="section_name" placeholder="Assigned Room (e.g., 101 or Lab-2)" class="form-control" required>
+        </div>
+
+        <div class="col-md-2">
+            <select name="year" id="year" class="form-select">
+                <option value="SE">SE</option>
+                <option value="TE">TE</option>
+                <option value="BE">BE</option>
+            </select>
+        </div>
+
+        <div class="col-md-2">
+            <select name="division" id="division" class="form-select">
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+            </select>
+        </div>
+
+        <div class="col-md-2">
+            <select name="section_type" id="section_type" class="form-select">
+                <option value="LEC">LEC</option>
+                <option value="LAB">LAB</option>
+            </select>
+        </div>
+
+        <div class="col-12 col-lg-2 d-flex gap-2">
+            <button type="submit" class="btn btn-brown w-100" id="sectionSubmitButton">Save Section</button>
+            <button type="button" class="btn btn-outline-secondary w-100" id="sectionCancelButton" onclick="resetSectionForm()" style="display:none;">Cancel</button>
+        </div>
+    </form>
+
+    <div class="table-wrapper mt-4">
+        <table class="table table-bordered table-hover text-center align-middle">
+            <thead>
+                <tr>
+                    <th>Assigned Room</th>
+                    <th>Year</th>
+                    <th>Division</th>
+                    <th>Type</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for section in class_sections %}
+                <tr>
+                    <td>{{ section[1] }}</td>
+                    <td>{{ section[2] }}</td>
+                    <td>{{ section[3] }}</td>
+                    <td>{{ section[4] }}</td>
+                    <td>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="editSection(`{{ section[0] }}, '{{ section[1] }}', '{{ section[2] }}', '{{ section[3] }}', '{{ section[4] }}')">Edit</button>
+                        <a href="/delete_class_section/{{ section[0] }}" class="btn btn-danger btn-sm">Delete</a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5">No class sections yet. Add one above.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .table-wrapper {
+        overflow-x: auto;
+    }
+
+    table {
+        background: white;
+        margin-bottom: 0;
+    }
+
+    th {
+        background: #6b4c3b;
+        color: white;
+        white-space: nowrap;
+    }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function editTeacher(id, name, code, subject, year, division, type) {
+    document.getElementById('teacher_assignment_id').value = id;
+    document.getElementById('teacher_name').value = name;
+    document.getElementById('teacher_code').value = code;
+    document.getElementById('teacher_subject').value = subject;
+    document.getElementById('teacher_year').value = year;
+    document.getElementById('teacher_division').value = division;
+    document.getElementById('teacher_type').value = type;
+    document.getElementById('teacherSubmitButton').textContent = 'Update Assignment';
+    document.getElementById('teacherCancelButton').style.display = 'inline-flex';
+}
+
+function resetTeacherForm() {
+    document.getElementById('teacherForm').reset();
+    document.getElementById('teacher_assignment_id').value = '';
+    document.getElementById('teacherSubmitButton').textContent = 'Save Assignment';
+    document.getElementById('teacherCancelButton').style.display = 'none';
+}
+
+function editSection(id, name, year, division, type) {
+    document.getElementById('section_id').value = id;
+    document.getElementById('section_name').value = name;
+    document.getElementById('year').value = year;
+    document.getElementById('division').value = division;
+    document.getElementById('section_type').value = type;
+    document.getElementById('sectionSubmitButton').textContent = 'Update Section';
+    document.getElementById('sectionCancelButton').style.display = 'inline-flex';
+}
+
+function resetSectionForm() {
+    document.getElementById('sectionForm').reset();
+    document.getElementById('section_id').value = '';
+    document.getElementById('sectionSubmitButton').textContent = 'Save Section';
+    document.getElementById('sectionCancelButton').style.display = 'none';
+}
+</script>
+{% endblock %}

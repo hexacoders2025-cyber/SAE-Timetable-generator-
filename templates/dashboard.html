@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block max_width %}1320px{% endblock %}
+
+{% block content %}
+<h2 class="mb-3">Dashboard</h2>
+
+<div class="section-card p-4 mb-4">
+    <div class="section-title">Quick Stats</div>
+    <div class="section-subtitle">Live summary of your data and generated schedule health.</div>
+    <div class="stats-grid">
+        {% for stat in stats %}
+        <div class="stat-card">
+            <div class="stat-value">{{ stat.value }}</div>
+            <div class="stat-label">{{ stat.label }}</div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-4">
+        <div class="section-card p-4 h-100">
+            <div class="section-title">Issue Alerts</div>
+            <div class="section-subtitle">Things to review before final timetable export.</div>
+            {% if alerts %}
+            <ul class="alerts-list">
+                {% for alert in alerts %}
+                <li>{{ alert }}</li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <div class="text-success fw-semibold">No issues found. Data looks consistent.</div>
+            {% endif %}
+
+            <hr class="my-4">
+            <div class="section-title mb-3">Quick Actions</div>
+            <div class="d-grid gap-2">
+                <a href="/teachers?section=teachers" class="btn btn-brown">Manage Teacher Data</a>
+                <a href="/teachers?section=classes" class="btn btn-outline-dark">Manage Class Data</a>
+                <a href="/timetable" class="btn btn-dark">Open Timetable Generator</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-8">
+        <div class="section-card p-4 h-100">
+            <div class="section-title">Today View ({{ today_label }})</div>
+            <div class="section-subtitle">Generated class schedule snapshot for today.</div>
+
+            {% if today_rows %}
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover today-table align-middle text-center mb-0">
+                    <thead>
+                        <tr>
+                            <th>Class</th>
+                            <th>Slot</th>
+                            <th>Subject</th>
+                            <th>Teacher</th>
+                            <th>Room</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in today_rows %}
+                        <tr>
+                            <td>{{ row.class_name }}</td>
+                            <td>{{ row.slot }}</td>
+                            <td>{{ row.subject }}</td>
+                            <td>{{ row.teacher_code }}</td>
+                            <td>{{ row.room }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-muted">No scheduled classes for today yet. Generate timetable to populate this view.</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(120px, 1fr));
+        gap: 12px;
+    }
+
+    .stat-card {
+        border-radius: 14px;
+        border: 1px solid #deccb9;
+        background: #fffaf5;
+        padding: 14px 12px;
+        text-align: center;
+    }
+
+    .stat-value {
+        font-size: 1.45rem;
+        font-weight: 700;
+        color: #4a3428;
+        line-height: 1.15;
+    }
+
+    .stat-label {
+        color: #7a6252;
+        font-size: 0.88rem;
+        margin-top: 4px;
+    }
+
+    .alerts-list {
+        margin: 0;
+        padding-left: 18px;
+    }
+
+    .alerts-list li {
+        margin-bottom: 8px;
+        color: #5c4538;
+    }
+
+    .today-table th {
+        background: #6b4c3b;
+        color: #fff;
+        font-size: 0.92rem;
+        white-space: nowrap;
+    }
+
+    .today-table td {
+        background: #fff;
+        vertical-align: middle;
+    }
+
+    @media (max-width: 1200px) {
+        .stats-grid {
+            grid-template-columns: repeat(3, minmax(120px, 1fr));
+        }
+    }
+
+    @media (max-width: 768px) {
+        .stats-grid {
+            grid-template-columns: repeat(2, minmax(120px, 1fr));
+        }
+    }
+
+    @media (max-width: 576px) {
+        .stats-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .today-table th,
+        .today-table td {
+            font-size: 0.83rem;
+            padding: 0.55rem 0.4rem;
+        }
+    }
+</style>
+{% endblock %}

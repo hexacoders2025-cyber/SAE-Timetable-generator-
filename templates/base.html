@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>{% block title %}Timetable App{% endblock %}</title>
+    
+    <!-- PWA Manifest & Icons -->
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
+    <meta name="theme-color" content="#6b4c3b">
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        :root {
+            --ui-bg: #e7ddd4;
+            --ui-surface: #f5eee7;
+            --ui-primary: #6b4c3b;
+            --ui-primary-hover: #8b6a55;
+            --ui-primary-deep: #563d30;
+            --ui-border: #d8c4b4;
+            --ui-text: #3f2e25;
+            --ui-text-soft: #eaded4;
+        }
+
+        body {
+            margin: 0;
+            background: var(--ui-bg);
+            color: var(--ui-text);
+        }
+
+        body.sidebar-open {
+            overflow: hidden;
+        }
+
+        .menu-toggle {
+            position: fixed;
+            top: 18px;
+            left: 18px;
+            width: 56px;
+            height: 56px;
+            border: 1px solid #8f6e59;
+            border-radius: 16px;
+            background: var(--ui-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 14px 30px rgba(107, 76, 59, 0.24);
+            z-index: 1200;
+            transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease;
+        }
+
+        .menu-toggle:hover {
+            background: var(--ui-primary-hover);
+        }
+
+        .menu-lines {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .menu-lines span {
+            display: block;
+            width: 24px;
+            height: 2px;
+            border-radius: 999px;
+            background: var(--ui-surface);
+        }
+
+        .sidebar-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(63, 46, 37, 0.32);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s ease;
+            z-index: 1180;
+        }
+
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 280px;
+            max-width: calc(100vw - 24px);
+            height: 100vh;
+            padding: 22px 18px;
+            background: linear-gradient(180deg, var(--ui-primary) 0%, var(--ui-primary-deep) 100%);
+            color: var(--ui-surface);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            transform: translateX(-100%);
+            transition: transform 0.28s ease;
+            box-shadow: 22px 0 50px rgba(63, 46, 37, 0.28);
+            z-index: 1190;
+        }
+
+        body.sidebar-open .sidebar {
+            transform: translateX(0);
+        }
+
+        body.sidebar-open .sidebar-backdrop {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        body.sidebar-open .menu-toggle {
+            opacity: 0;
+            pointer-events: none;
+            transform: scale(0.9);
+        }
+
+        .sidebar-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 28px;
+        }
+
+        .sidebar-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .sidebar-logo {
+            width: 54px;
+            height: 54px;
+            object-fit: cover;
+            border-radius: 14px;
+            background: #fff7f1;
+            border: 1px solid var(--ui-border);
+            padding: 6px;
+        }
+
+        .sidebar-title {
+            margin: 0;
+            font-size: 1.6rem;
+            font-weight: 700;
+            line-height: 1.1;
+        }
+
+        .sidebar-subtitle {
+            margin-top: 4px;
+            color: var(--ui-text-soft);
+            font-size: 0.9rem;
+        }
+
+        .close-sidebar {
+            position: relative;
+            width: 42px;
+            height: 42px;
+            border: none;
+            border-radius: 12px;
+            background: transparent;
+            cursor: pointer;
+        }
+
+        .close-sidebar:hover {
+            background: rgba(245, 238, 231, 0.12);
+        }
+
+        .close-sidebar::before,
+        .close-sidebar::after {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 2px;
+            background: var(--ui-surface);
+            border-radius: 999px;
+            transform-origin: center;
+        }
+
+        .close-sidebar::before {
+            transform: translate(-50%, -50%) rotate(45deg);
+        }
+
+        .close-sidebar::after {
+            transform: translate(-50%, -50%) rotate(-45deg);
+        }
+
+        .sidebar-links {
+            display: grid;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        .sidebar-toggle {
+            width: 100%;
+            border: none;
+            background: transparent;
+            color: #f8f1eb;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 14px;
+            border-radius: 12px;
+            font-size: 1.05rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .sidebar-chevron {
+            width: 9px;
+            height: 9px;
+            border-right: 2px solid #f8f1eb;
+            border-bottom: 2px solid #f8f1eb;
+            transform: rotate(45deg);
+            transition: transform 0.2s ease;
+            margin-right: 4px;
+        }
+
+        .sidebar-submenu {
+            display: none;
+            gap: 6px;
+            padding-left: 12px;
+            border-left: 1px solid rgba(245, 238, 231, 0.25);
+        }
+
+        .sidebar-submenu.open {
+            display: grid;
+        }
+
+        .sidebar-submenu a {
+            font-size: 0.95rem;
+            border-radius: 12px;
+            background: rgba(255, 248, 241, 0.08);
+            padding: 10px 14px;
+        }
+
+        .sidebar a {
+            color: #f8f1eb;
+            display: flex;
+            align-items: center;
+            padding: 12px 14px;
+            text-decoration: none;
+            border-radius: 12px;
+            font-size: 1.05rem;
+            font-weight: 500;
+            transition: background 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .sidebar a:hover,
+        .sidebar a.active {
+            background: rgba(245, 238, 231, 0.18);
+            box-shadow: inset 0 0 0 1px rgba(245, 238, 231, 0.2);
+        }
+
+        .sidebar-toggle:hover,
+        .sidebar-toggle.active {
+            background: rgba(245, 238, 231, 0.18);
+            box-shadow: inset 0 0 0 1px rgba(245, 238, 231, 0.2);
+        }
+
+        .sidebar-toggle[aria-expanded="true"] .sidebar-chevron {
+            transform: rotate(-135deg);
+            margin-top: 4px;
+        }
+
+        .logout-link {
+            margin-top: auto;
+            background: var(--ui-surface);
+            color: var(--ui-primary) !important;
+            border: 1px solid var(--ui-border);
+            text-align: center;
+            font-weight: 600;
+        }
+
+        .logout-link:hover {
+            background: #fff8f3;
+        }
+
+        .main {
+            padding: 92px 30px 30px;
+            max-width: {% block max_width %}1320px{% endblock %};
+            margin: 0 auto;
+        }
+
+        .card {
+            background: #f5eee7;
+            border-radius: 15px;
+            border: none;
+            box-shadow: 9px 9px 16px #d5cabd, -9px -9px 16px #ffffff;
+        }
+
+        .section-card {
+            background: #f5eee7;
+            border-radius: 18px;
+            border: none;
+            box-shadow: 9px 9px 16px #d5cabd, -9px -9px 16px #ffffff;
+        }
+
+        .section-title {
+            font-size: 1.08rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .section-subtitle {
+            color: #6d5a4d;
+            margin-bottom: 18px;
+        }
+
+        .btn {
+            border-radius: 10px;
+            transition: all 0.2s ease;
+        }
+
+        .btn-brown {
+            background: #6b4c3b;
+            color: white;
+            border: none;
+            box-shadow: 4px 4px 8px #d5cabd, -4px -4px 8px #ffffff;
+        }
+
+        .btn-brown:hover {
+            background: #8b6a55;
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        .btn-brown:active {
+            box-shadow: inset 4px 4px 8px #483327, inset -4px -4px 8px #8b6a55;
+            transform: translateY(0);
+        }
+
+        @media (max-width: 768px) {
+            .main {
+                padding: 92px 18px 24px;
+            }
+        }
+
+        @media (max-width: 576px) {
+            .menu-toggle {
+                left: 14px;
+                width: 50px;
+                height: 50px;
+            }
+
+            .main {
+                padding: 88px 12px 20px;
+            }
+
+            .section-card {
+                border-radius: 16px;
+            }
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+    {% include "_pwa_head.html" %}
+</head>
+
+<body>
+    {% include "_pwa_banner.html" %}
+
+    <button class="menu-toggle" type="button" onclick="openSidebar()" aria-label="Open sidebar">
+        <div class="menu-lines">
+            <span></span>
+            <span></span>
+            <span></span>
+        </div>
+    </button>
+
+    <div class="sidebar-backdrop" onclick="closeSidebar()"></div>
+
+    <aside class="sidebar" aria-hidden="true">
+        <div class="sidebar-header">
+            <div class="sidebar-brand">
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="College logo" class="sidebar-logo">
+                <div>
+                    <h5 class="sidebar-title">Timetable</h5>
+                    <div class="sidebar-subtitle">College Portal</div>
+                </div>
+            </div>
+            <button class="close-sidebar" type="button" onclick="closeSidebar()" aria-label="Close sidebar"></button>
+        </div>
+
+        <nav class="sidebar-links">
+            <a href="/dashboard" class="{% if active_page == 'dashboard' %}active{% endif %}">Home</a>
+
+            <button type="button" class="sidebar-toggle {% if active_page == 'teachers' %}active{% endif %}"
+                id="dataMenuTrigger" aria-expanded="{% if active_page == 'teachers' %}true{% else %}false{% endif %}"
+                onclick="toggleDataMenu()">
+                <span>Data</span>
+                <span class="sidebar-chevron"></span>
+            </button>
+            <div class="sidebar-submenu {% if active_page == 'teachers' %}open{% endif %}" id="dataSubmenu">
+                <a href="/teachers?section=teachers"
+                    class="{% if active_page == 'teachers' and selected_section != 'classes' %}active{% endif %}">Teacher
+                    Data</a>
+                <a href="/teachers?section=classes"
+                    class="{% if active_page == 'teachers' and selected_section == 'classes' %}active{% endif %}">Class
+                    Data</a>
+            </div>
+
+            <a href="/timetable" class="{% if active_page == 'timetable' %}active{% endif %}">Timetable</a>
+        </nav>
+
+        <a href="/logout" class="logout-link">Logout</a>
+    </aside>
+
+    <div class="main">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ 'success' if category == 'success' else 'warning' }} alert-dismissible fade show"
+            role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <script>
+        function openSidebar() {
+            document.body.classList.add("sidebar-open");
+        }
+
+        function closeSidebar() {
+            document.body.classList.remove("sidebar-open");
+        }
+
+        function toggleDataMenu() {
+            const trigger = document.getElementById("dataMenuTrigger");
+            const submenu = document.getElementById("dataSubmenu");
+            const isExpanded = trigger.getAttribute("aria-expanded") === "true";
+            const nextState = !isExpanded;
+
+            trigger.setAttribute("aria-expanded", String(nextState));
+            trigger.classList.toggle("active", nextState);
+            submenu.classList.toggle("open", nextState);
+        }
+
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") {
+                closeSidebar();
+                if (typeof closeEditPanel === "function") {
+                    closeEditPanel();
+                }
+            }
+        });
+
+        document.querySelectorAll(".sidebar a").forEach(function (link) {
+            link.addEventListener("click", closeSidebar);
+        });
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/pwa.js') }}" defer></script>
+    {% block scripts %}{% endblock %}
+
+</body>
+
+</html>

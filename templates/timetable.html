@@ -1,0 +1,596 @@
+{% extends "base.html" %}
+
+{% block title %}Timetable{% endblock %}
+
+{% block max_width %}1380px{% endblock %}
+
+{% block content %}
+<div class="card p-4">
+    <h3>{{ page_heading }}</h3>
+
+    <div class="row mb-3 filter-row">
+        <div class="col-md-3">
+            <select id="type" class="form-control">
+                <option value="">Select Type</option>
+                <option value="student">Student</option>
+                <option value="teacher">Teacher</option>
+                <option value="room">Room</option>
+            </select>
+        </div>
+
+        <div class="col-md-3">
+            <select id="options" class="form-control">
+                <option value="">Select Option</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="mb-3 toolbar-row">
+        <button onclick="generateTimetable()" class="btn btn-brown">Generate</button>
+        <button onclick="downloadPDF()" class="btn btn-dark" {% if not has_timetable %}disabled{% endif %}><i class="fa-solid fa-file-pdf"></i> Download PDF</button>
+        <button onclick="shareToWhatsApp()" class="btn btn-success" {% if not has_timetable %}disabled title="Generate a student timetable first"{% endif %}><i class="fa-brands fa-whatsapp"></i> Share on WhatsApp</button>
+        <button onclick="toggleEditPanel()" class="btn btn-warning" id="editBtn">Edit</button>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-warning">{{ error }}</div>
+    {% endif %}
+
+    <div id="subjectsPanel" class="subjects-panel d-none">
+        <div class="subjects-title">Edit Timetable Data</div>
+        <div class="subjects-grid">
+        {% for subject in editable_subjects %}
+            <div
+                class="subject-card"
+                data-subject-id="{{ subject.id }}"
+                data-subject="{{ subject.subject }}"
+                data-teacher-code="{{ subject.teacher_code }}"
+                data-room="{{ subject.room }}"
+                data-entry-type="{{ subject.entry_type }}"
+                data-duration="{{ subject.duration }}"
+            >
+                <div>{{ subject.subject }}</div>
+                <div>{{ subject.teacher_code }}</div>
+                <div>{{ subject.room }}</div>
+            </div>
+        {% else %}
+            <div class="text-muted">No subjects available for editing yet.</div>
+        {% endfor %}
+        </div>
+
+        <div class="editor-actions">
+            <button onclick="smartAutoFill()" class="btn btn-primary" id="autoFillBtn"><i class="fa-solid fa-wand-magic-sparkles"></i> Smart Auto-Fill</button>
+            <button onclick="saveEdits()" class="btn btn-success">Save</button>
+            <button onclick="closeEditPanel()" class="btn btn-secondary">Close</button>
+        </div>
+    </div>
+
+    <div class="table-shell">
+        <table class="table table-bordered text-center timetable-table">
+            <thead>
+                <tr>
+                    <th>Day</th>
+                    {% for column in slot_headers %}
+                    <th>{{ column.label }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for day in days %}
+                <tr>
+                    <td>{{ day }}</td>
+                    {% for cell in grid[day] %}
+                    <td
+                        class="{% if not cell.editable %}break{% else %}editable-cell{% endif %}"
+                        data-day="{{ day }}"
+                        data-slot="{{ cell.slot }}"
+                        data-editable="{{ 'true' if cell.editable else 'false' }}"
+                        data-subject-id="{{ cell.subject_id }}"
+                        data-room="{{ cell.room }}"
+                        data-entry-type="{{ cell.entry_type }}"
+                    >
+                        <div class="cell-subject">{{ cell.subject }}</div>
+                        {% if cell.code %}
+                        <div class="cell-code">{{ cell.code }}</div>
+                        {% endif %}
+                        {% if cell.room %}
+                        <div class="cell-room">{{ cell.room }}</div>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .break {
+        background: #d9c3b0;
+        font-weight: bold;
+    }
+
+    .subjects-panel {
+        margin: 24px 0;
+        padding: 18px 20px;
+        border-radius: 18px;
+        background: #f5eee7;
+        border: 1px solid #d8c4b4;
+        box-shadow: 0 10px 24px rgba(107, 76, 59, 0.08);
+    }
+
+    .subjects-title {
+        margin-bottom: 14px;
+        color: #6b4c3b;
+        font-size: 1rem;
+        font-weight: 700;
+    }
+
+    .subjects-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+    }
+
+    .subject-card {
+        min-height: 92px;
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 1px solid #d5bdaa;
+        background: #fffdfb;
+        color: #3f2e25;
+        font-weight: 600;
+        line-height: 1.35;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(107, 76, 59, 0.08);
+        transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+    }
+
+    .subject-card:hover,
+    .subject-card.active {
+        transform: translateY(-2px);
+        background: #fff6f0;
+        box-shadow: 0 8px 18px rgba(107, 76, 59, 0.14);
+    }
+
+    .table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    th,
+    td {
+        word-break: break-word;
+        vertical-align: middle;
+    }
+
+    .editable-cell {
+        cursor: pointer;
+    }
+
+    .editable-cell.selected-cell {
+        outline: 2px solid #8b6a55;
+        outline-offset: -2px;
+    }
+
+    .editor-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 18px;
+    }
+
+    .filter-row {
+        --bs-gutter-x: 12px;
+        --bs-gutter-y: 12px;
+    }
+
+    .toolbar-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .table-shell {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        border-radius: 16px;
+    }
+
+    .timetable-table {
+        min-width: 860px;
+    }
+
+    .cell-subject {
+        font-weight: 700;
+        line-height: 1.35;
+    }
+
+    .cell-code,
+    .cell-room {
+        margin-top: 4px;
+        font-size: 0.9rem;
+    }
+
+    .d-none {
+        display: none !important;
+    }
+
+    @media (max-width: 768px) {
+        .subjects-grid {
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        }
+    }
+
+    @media (max-width: 576px) {
+        .toolbar-row {
+            display: grid;
+            grid-template-columns: 1fr;
+        }
+
+        .toolbar-row .btn {
+            width: 100%;
+        }
+
+        .subjects-panel {
+            padding: 16px;
+        }
+
+        .subject-card {
+            min-height: 84px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const teacherOptions = {{ teacher_options | tojson }};
+const studentOptions = {{ student_options | tojson }};
+const roomOptions = {{ room_options | tojson }};
+const selectedType = {{ selected_type | tojson }};
+const selectedValue = {{ selected_value | tojson }};
+
+const typeSelect = document.getElementById("type");
+const optionSelect = document.getElementById("options");
+const subjectsPanel = document.getElementById("subjectsPanel");
+const subjectCards = Array.from(document.querySelectorAll(".subject-card"));
+const editableCells = Array.from(document.querySelectorAll("[data-editable='true']"));
+const slotHeaders = {{ slot_headers | tojson }};
+const fullSlotOrder = slotHeaders.map(function (column) { return column.slot; });
+const cellMap = new Map(editableCells.map(function (cell) {
+    return [`${cell.dataset.day}|${cell.dataset.slot}`, cell];
+}));
+
+let activeCard = null;
+
+function generateTimetable() {
+    const type = typeSelect.value;
+    const value = optionSelect.value;
+
+    if (!type || !value) {
+        alert("Select type first");
+        return;
+    }
+
+    window.location.href = `/generate?type=${encodeURIComponent(type)}&value=${encodeURIComponent(value)}`;
+}
+
+function downloadPDF() {
+    window.location.href = "/download";
+}
+
+function populateOptions() {
+    const val = typeSelect.value;
+    optionSelect.innerHTML = "";
+    optionSelect.add(new Option("Select Option", ""));
+
+    if (val === "student") {
+        studentOptions.forEach(function (v) {
+            optionSelect.add(new Option(v, v));
+        });
+    }
+
+    if (val === "teacher") {
+        teacherOptions.forEach(function (t) {
+            optionSelect.add(new Option(t.code + " - " + t.name, t.code));
+        });
+    }
+
+    if (val === "room") {
+        roomOptions.forEach(function (v) {
+            optionSelect.add(new Option(v, v));
+        });
+    }
+
+    if (selectedType === val && selectedValue) {
+        optionSelect.value = selectedValue;
+    }
+}
+
+function resetCardSelection() {
+    activeCard = null;
+    subjectCards.forEach(function (card) {
+        card.classList.remove("active");
+    });
+}
+
+function closeEditPanel() {
+    subjectsPanel.classList.add("d-none");
+    resetCardSelection();
+    editableCells.forEach(function (cell) {
+        cell.classList.remove("selected-cell");
+    });
+}
+
+function loadedStudentSelection() {
+    return selectedType === "student" && selectedValue && typeSelect.value === selectedType && optionSelect.value === selectedValue;
+}
+
+function toggleEditPanel() {
+    if (typeSelect.value !== "student" || !optionSelect.value) {
+        alert("Select student class first.");
+        return;
+    }
+
+    if (!loadedStudentSelection()) {
+        alert("Generate the selected student timetable first.");
+        return;
+    }
+
+    subjectsPanel.classList.toggle("d-none");
+    if (subjectsPanel.classList.contains("d-none")) {
+        resetCardSelection();
+    }
+}
+
+function setCellContent(cell, payload) {
+    cell.dataset.subjectId = payload.subjectId || "";
+    cell.dataset.room = payload.room || "";
+    cell.dataset.entryType = payload.entryType || "lec";
+    cell.innerHTML = `
+        <div class="cell-subject">${payload.subject || "-"}</div>
+        ${payload.teacherCode ? `<div class="cell-code">${payload.teacherCode}</div>` : ""}
+        ${payload.room ? `<div class="cell-room">${payload.room}</div>` : ""}
+    `;
+}
+
+function clearCell(cell) {
+    cell.dataset.subjectId = "";
+    cell.dataset.room = "";
+    cell.dataset.entryType = "free";
+    cell.innerHTML = `<div class="cell-subject">-</div>`;
+}
+
+function getPlacementCells(startCell, duration) {
+    const cells = [startCell];
+    const startIndex = fullSlotOrder.indexOf(startCell.dataset.slot);
+
+    for (let step = 1; step < duration; step++) {
+        const nextSlot = fullSlotOrder[startIndex + step];
+        if (!nextSlot || nextSlot === "BREAK" || nextSlot === "LUNCH") {
+            return null;
+        }
+
+        const nextCell = cellMap.get(`${startCell.dataset.day}|${nextSlot}`);
+        if (!nextCell) {
+            return null;
+        }
+
+        cells.push(nextCell);
+    }
+
+    return cells;
+}
+
+function clearLabBlock(cell) {
+    const subjectId = cell.dataset.subjectId;
+    if (!subjectId || cell.dataset.entryType !== "lab") {
+        clearCell(cell);
+        return;
+    }
+
+    const slotIndex = fullSlotOrder.indexOf(cell.dataset.slot);
+    const relatedCells = [cell];
+
+    for (let offset = 1; offset <= 1; offset++) {
+        const prevSlot = fullSlotOrder[slotIndex - offset];
+        if (!prevSlot || prevSlot === "BREAK" || prevSlot === "LUNCH") {
+            break;
+        }
+        const prevCell = cellMap.get(`${cell.dataset.day}|${prevSlot}`);
+        if (!prevCell || prevCell.dataset.subjectId !== subjectId || prevCell.dataset.entryType !== "lab") {
+            break;
+        }
+        relatedCells.push(prevCell);
+    }
+
+    for (let offset = 1; offset <= 1; offset++) {
+        const nextSlot = fullSlotOrder[slotIndex + offset];
+        if (!nextSlot || nextSlot === "BREAK" || nextSlot === "LUNCH") {
+            break;
+        }
+        const nextCell = cellMap.get(`${cell.dataset.day}|${nextSlot}`);
+        if (!nextCell || nextCell.dataset.subjectId !== subjectId || nextCell.dataset.entryType !== "lab") {
+            break;
+        }
+        relatedCells.push(nextCell);
+    }
+
+    relatedCells.forEach(clearCell);
+}
+
+subjectCards.forEach(function (card) {
+    card.addEventListener("click", function () {
+        const alreadyActive = card.classList.contains("active");
+        resetCardSelection();
+
+        if (alreadyActive) {
+            document.getElementById("autoFillBtn").classList.add("disabled");
+            return;
+        }
+
+        card.classList.add("active");
+        activeCard = {
+            subjectId: card.dataset.subjectId,
+            subject: card.dataset.subject,
+            teacherCode: card.dataset.teacherCode,
+            room: card.dataset.room,
+            entryType: card.dataset.entryType || "lec",
+            duration: Number(card.dataset.duration || "1")
+        };
+        document.getElementById("autoFillBtn").classList.remove("disabled");
+    });
+});
+
+editableCells.forEach(function (cell) {
+    cell.addEventListener("click", function () {
+        if (subjectsPanel.classList.contains("d-none")) {
+            return;
+        }
+
+        editableCells.forEach(function (item) {
+            item.classList.remove("selected-cell");
+        });
+        cell.classList.add("selected-cell");
+
+        if (activeCard) {
+            const placementCells = getPlacementCells(cell, activeCard.duration);
+            if (!placementCells) {
+                alert("This lab needs two continuous hours. Choose a valid starting slot.");
+                return;
+            }
+
+            placementCells.forEach(function (placementCell) {
+                setCellContent(placementCell, activeCard);
+            });
+            return;
+        }
+
+        if (cell.dataset.subjectId) {
+            clearLabBlock(cell);
+        }
+    });
+});
+
+async function saveEdits() {
+    if (!loadedStudentSelection()) {
+        alert("Generate the selected student timetable first.");
+        return;
+    }
+
+    const cells = editableCells.map(function (cell) {
+        return {
+            day: cell.dataset.day,
+            slot: cell.dataset.slot,
+            subject_id: cell.dataset.subjectId || "",
+            room: cell.dataset.room || ""
+        };
+    });
+
+    const response = await fetch("/save_timetable_edits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            selected_type: "student",
+            selected_value: optionSelect.value,
+            cells: cells
+        })
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+        alert(data.message || "Unable to save timetable changes.");
+        return;
+    }
+
+    window.location.href = data.redirect;
+}
+
+async function smartAutoFill() {
+    if (!activeCard) return;
+    if (!loadedStudentSelection()) return;
+
+    const cells = editableCells.map(function (cell) {
+        return {
+            day: cell.dataset.day,
+            slot: cell.dataset.slot,
+            subject_id: cell.dataset.subjectId || "",
+            room: cell.dataset.room || ""
+        };
+    });
+
+    const autoFillBtn = document.getElementById("autoFillBtn");
+    autoFillBtn.disabled = true;
+    autoFillBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Thinking...';
+
+    try {
+        const response = await fetch("/auto_fill_suggestion", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                class_name: optionSelect.value,
+                subject_id: activeCard.subjectId,
+                duration: activeCard.duration,
+                current_cells: cells
+            })
+        });
+
+        const data = await response.json();
+        if (data.status === "success" && data.suggestion) {
+            const startCell = cellMap.get(`${data.suggestion.day}|${data.suggestion.slot}`);
+            if (startCell) {
+                const placementCells = getPlacementCells(startCell, activeCard.duration);
+                if (placementCells) {
+                    placementCells.forEach(function (placementCell) {
+                        setCellContent(placementCell, activeCard);
+                    });
+                    // Visual feedback
+                    startCell.classList.add("selected-cell");
+                    setTimeout(() => startCell.classList.remove("selected-cell"), 2000);
+                } else {
+                    alert("Suggested slot could not be placed due to duration bounds.");
+                }
+            }
+        } else {
+            alert(data.message || "No valid non-conflicting slot found for this teacher and class.");
+        }
+    } catch (err) {
+        alert("Error during auto-fill: " + err.message);
+    } finally {
+        autoFillBtn.disabled = false;
+        autoFillBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Smart Auto-Fill';
+    }
+}
+
+function shareToWhatsApp() {
+    const classVal = optionSelect.value || "All Classes";
+    const text = `Hello! The finalized timetable for ${classVal} is ready. Please find the attached PDF or check the portal.`;
+    const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(url, '_blank');
+}
+
+typeSelect.addEventListener("change", function () {
+    populateOptions();
+    closeEditPanel();
+});
+
+optionSelect.addEventListener("change", function () {
+    closeEditPanel();
+});
+
+if (selectedType) {
+    typeSelect.value = selectedType;
+}
+
+populateOptions();
+</script>
+{% endblock %}

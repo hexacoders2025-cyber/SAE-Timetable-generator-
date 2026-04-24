@@ -1,0 +1,22 @@
+{
+    "name": "Timetable Portal",
+    "short_name": "Timetable",
+    "description": "College timetable portal optimized for mobile and iPhone home-screen install.",
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "background_color": "#e8ddd2",
+    "theme_color": "#6c4c39",
+    "icons": [
+        {
+            "src": "/static/images/apple-touch-icon.png",
+            "sizes": "180x180",
+            "type": "image/png"
+        },
+        {
+            "src": "/static/images/app-icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ]
+}
