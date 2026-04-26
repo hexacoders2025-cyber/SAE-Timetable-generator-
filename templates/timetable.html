@@ -8,6 +8,7 @@
 <div class="card p-4">
     <h3>{{ page_heading }}</h3>
 
+    {% if session.get('role') != 'teacher' %}
     <div class="row mb-3 filter-row">
         <div class="col-md-3">
             <select id="type" class="form-control">
@@ -24,12 +25,18 @@
             </select>
         </div>
     </div>
+    {% endif %}
 
     <div class="mb-3 toolbar-row">
-        <button onclick="generateTimetable()" class="btn btn-brown">Generate</button>
+        {% if session.get('role') != 'teacher' %}
+        <button onclick="viewTimetable()" class="btn btn-brown"><i class="fa-solid fa-eye"></i> View</button>
+        <button onclick="regenerateTimetable()" class="btn btn-danger" title="Overwrite current timetable and regenerate"><i class="fa-solid fa-rotate"></i> Regenerate All</button>
+        {% endif %}
         <button onclick="downloadPDF()" class="btn btn-dark" {% if not has_timetable %}disabled{% endif %}><i class="fa-solid fa-file-pdf"></i> Download PDF</button>
         <button onclick="shareToWhatsApp()" class="btn btn-success" {% if not has_timetable %}disabled title="Generate a student timetable first"{% endif %}><i class="fa-brands fa-whatsapp"></i> Share on WhatsApp</button>
-        <button onclick="toggleEditPanel()" class="btn btn-warning" id="editBtn">Edit</button>
+        {% if session.get('role') != 'teacher' %}
+        <button onclick="toggleEditPanel()" class="btn btn-warning" id="editBtn"><i class="fa-solid fa-pen"></i> Edit</button>
+        {% endif %}
     </div>
 
     {% if error %}
@@ -81,21 +88,28 @@
                 <tr>
                     <td>{{ day }}</td>
                     {% for cell in grid[day] %}
+                    {% set is_teacher = session.get('role') == 'teacher' %}
+                    {% set is_available = teacher_availability.get((day, cell.slot), True) if is_teacher else True %}
                     <td
-                        class="{% if not cell.editable %}break{% else %}editable-cell{% endif %}"
+                        class="{% if not cell.editable %}break{% else %}editable-cell{% endif %} {% if is_teacher and cell.editable %}{% if is_available %}avail-true{% else %}avail-false{% endif %} teacher-slot{% endif %}"
                         data-day="{{ day }}"
                         data-slot="{{ cell.slot }}"
                         data-editable="{{ 'true' if cell.editable else 'false' }}"
                         data-subject-id="{{ cell.subject_id }}"
                         data-room="{{ cell.room }}"
                         data-entry-type="{{ cell.entry_type }}"
+                        {% if is_teacher and cell.editable %}onclick="toggleTeacherAvailability(this)"{% endif %}
                     >
-                        <div class="cell-subject">{{ cell.subject }}</div>
-                        {% if cell.code %}
-                        <div class="cell-code">{{ cell.code }}</div>
-                        {% endif %}
-                        {% if cell.room %}
-                        <div class="cell-room">{{ cell.room }}</div>
+                        {% if is_teacher and cell.editable and not cell.subject and not cell.subject_id %}
+                            <div class="free-slot-indicator"><i class="fa-solid fa-circle-check" style="color: {% if is_available %}#4caf50{% else %}#f44336{% endif %}; font-size: 1.5rem; opacity: 0.5;"></i></div>
+                        {% else %}
+                            <div class="cell-subject">{{ cell.subject }}</div>
+                            {% if cell.code %}
+                            <div class="cell-code">{{ cell.code }}</div>
+                            {% endif %}
+                            {% if cell.room %}
+                            <div class="cell-room">{{ cell.room }}</div>
+                            {% endif %}
                         {% endif %}
                     </td>
                     {% endfor %}
@@ -128,6 +142,21 @@
         color: #6b4c3b;
         font-size: 1rem;
         font-weight: 700;
+    }
+
+    .avail-true {
+        background: #f5eee7 !important;
+        box-shadow: 5px 5px 10px #d5cabd, -5px -5px 10px #ffffff !important;
+    }
+
+    .avail-false {
+        background: #e7ddd4 !important;
+        box-shadow: inset 5px 5px 10px #d5cabd, inset -5px -5px 10px #ffffff !important;
+        opacity: 0.8;
+    }
+
+    .teacher-slot {
+        transition: all 0.2s ease;
     }
 
     .subjects-grid {
@@ -272,7 +301,7 @@ const cellMap = new Map(editableCells.map(function (cell) {
 
 let activeCard = null;
 
-function generateTimetable() {
+function viewTimetable() {
     const type = typeSelect.value;
     const value = optionSelect.value;
 
@@ -282,6 +311,20 @@ function generateTimetable() {
     }
 
     window.location.href = `/generate?type=${encodeURIComponent(type)}&value=${encodeURIComponent(value)}`;
+}
+
+function regenerateTimetable() {
+    const type = typeSelect.value;
+    const value = optionSelect.value;
+
+    if (!type || !value) {
+        alert("Select type first");
+        return;
+    }
+    
+    if (confirm("This will overwrite all manual edits and generate a completely new timetable for all classes. Are you sure?")) {
+        window.location.href = `/generate?type=${encodeURIComponent(type)}&value=${encodeURIComponent(value)}&force=true`;
+    }
 }
 
 function downloadPDF() {
@@ -573,8 +616,44 @@ async function smartAutoFill() {
 
 function shareToWhatsApp() {
     const classVal = optionSelect.value || "All Classes";
-    const text = `Hello! The finalized timetable for ${classVal} is ready. Please find the attached PDF or check the portal.`;
-    const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    let text = `*Timetable for ${classVal}*\n\n`;
+    
+    const rows = document.querySelectorAll('.timetable-table tbody tr');
+    let hasContent = false;
+    
+    rows.forEach(function (row) {
+        const day = row.cells[0].innerText.trim();
+        let dayText = `*${day}*\n`;
+        let dayHasClasses = false;
+        
+        const cells = Array.from(row.querySelectorAll('td[data-slot]'));
+        cells.forEach(function (cell) {
+            const slot = cell.dataset.slot;
+            const subject = cell.querySelector('.cell-subject') ? cell.querySelector('.cell-subject').innerText.trim() : '-';
+            const room = cell.querySelector('.cell-room') ? cell.querySelector('.cell-room').innerText.trim() : '';
+            const code = cell.querySelector('.cell-code') ? cell.querySelector('.cell-code').innerText.trim() : '';
+            
+            if (subject !== '-' && subject !== 'SHORT BREAK' && subject !== 'LUNCH') {
+                dayHasClasses = true;
+                dayText += `• ${slot}: ${subject}`;
+                if (code) dayText += ` (${code})`;
+                if (room) dayText += ` [${room}]`;
+                dayText += `\n`;
+            }
+        });
+        
+        if (dayHasClasses) {
+            text += dayText + '\n';
+            hasContent = true;
+        }
+    });
+    
+    if (!hasContent) {
+        text += "No classes scheduled.";
+    }
+    
+    text += `\nPlease find the attached PDF or check the portal for more details.`;
+    const url = `https://wa.me/?text=${encodeURIComponent(text.trim())}`;
     window.open(url, '_blank');
 }
 
@@ -592,5 +671,50 @@ if (selectedType) {
 }
 
 populateOptions();
+
+async function toggleTeacherAvailability(cell) {
+    if (cell.dataset.subjectId || cell.querySelector('.cell-subject')) return;
+    
+    const day = cell.dataset.day;
+    const slot = cell.dataset.slot;
+    const isCurrentlyAvailable = cell.classList.contains('avail-true');
+    const newAvailability = !isCurrentlyAvailable;
+    
+    const icon = cell.querySelector('.fa-circle-check');
+    if (icon) {
+        icon.style.color = newAvailability ? '#4caf50' : '#f44336';
+    }
+    
+    cell.classList.remove('avail-true', 'avail-false');
+    cell.classList.add(newAvailability ? 'avail-true' : 'avail-false');
+
+    try {
+        const response = await fetch('/update_availability', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                day: day,
+                slot: slot,
+                is_available: newAvailability
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to update');
+        }
+    } catch (error) {
+        console.error('Error updating availability:', error);
+        alert('Failed to save availability. Please try again.');
+        
+        // Revert UI on failure
+        if (icon) {
+            icon.style.color = isCurrentlyAvailable ? '#4caf50' : '#f44336';
+        }
+        cell.classList.remove('avail-true', 'avail-false');
+        cell.classList.add(isCurrentlyAvailable ? 'avail-true' : 'avail-false');
+    }
+}
 </script>
 {% endblock %}

@@ -753,7 +753,16 @@ def login():
             session["teacher_id"] = user.get("teacher_id")
             flash(f"Logged in successfully to {department}.", "success")
             if session.get("role") == "teacher":
-                return redirect(url_for("teacher_portal"))
+                teacher_id = session.get("teacher_id")
+                from database import get_teacher_records
+                teacher_code = ""
+                if teacher_id:
+                    for tid, tname, tcode in get_teacher_records():
+                        if tid == teacher_id:
+                            teacher_code = tcode
+                            break
+                session["teacher_code"] = teacher_code
+                return redirect(url_for("timetable"))
             return redirect(url_for("dashboard"))
         
         flash("Invalid username, password, or department.", "warning")
@@ -914,17 +923,30 @@ def seed_demo_data_route():
 @app.route("/timetable")
 @login_required
 def timetable():
-    selected_type = session.get("timetable_type", "")
-    selected_value = session.get("timetable_value", "")
+    if session.get("role") == "teacher":
+        selected_type = "teacher"
+        selected_value = session.get("teacher_code")
+        session["timetable_type"] = selected_type
+        session["timetable_value"] = selected_value
+    else:
+        selected_type = session.get("timetable_type", "")
+        selected_value = session.get("timetable_value", "")
 
     master = load_timetable()
     timetable_grid = None
+    teacher_availability = []
 
     if master and selected_type and selected_value:
         if selected_type == "student":
             filtered_entries = get_student_view(master, selected_value)
         elif selected_type == "teacher":
             filtered_entries = get_teacher_view(master, selected_value)
+            if session.get("role") == "teacher":
+                from database import get_teacher_availability
+                teacher_id = session.get("teacher_id")
+                if teacher_id:
+                    availability_data = get_teacher_availability(teacher_id)
+                    teacher_availability = {(a["day"], a["slot"]): a["is_available"] for a in availability_data}
         else:
             filtered_entries = get_room_view(master, selected_value)
         
@@ -932,6 +954,7 @@ def timetable():
 
     return render_template(
         "timetable.html",
+        teacher_availability=teacher_availability,
         **_timetable_context(
             timetable=timetable_grid,
             selected_type=selected_type,
@@ -962,11 +985,20 @@ def generate():
             ),
         )
 
-    generated_new_master = not bool(saved_master)
-    master = saved_master or generate_master()
-    if selected_type == "student" and master and not any(entry.get("class") == selected_value for entry in master):
+    if saved_master is None:
+        saved_master = load_timetable()
+
+    force_regenerate = request.args.get("force", "false").lower() == "true"
+    generated_new_master = False
+
+    if not saved_master or force_regenerate:
         master = generate_master()
         generated_new_master = True
+    else:
+        master = saved_master
+        if selected_type == "student" and master and not any(entry.get("class") == selected_value for entry in master):
+            master = generate_master()
+            generated_new_master = True
 
     if not master:
         return render_template(
@@ -992,6 +1024,9 @@ def generate():
     saved_view_entries = filtered_entries
     saved_grid = timetable_grid
     saved_selection = {"type": selected_type, "value": selected_value}
+
+    session["timetable_type"] = selected_type
+    session["timetable_value"] = selected_value
 
     if generated_new_master:
         save_timetable(master)
@@ -1022,11 +1057,17 @@ def save_timetable_edits():
     if selected_type != "student" or not selected_value:
         return jsonify({"ok": False, "message": "Manual editing is available for student timetables only."}), 400
 
+    if saved_master is None:
+        saved_master = load_timetable()
+
     manual_entries = _build_manual_entries(selected_value, cells)
     saved_master = _merge_class_entries(saved_master, selected_value, manual_entries)
     saved_view_entries = get_student_view(saved_master, selected_value)
     saved_grid = _build_timetable_grid(saved_view_entries, selected_type)
     saved_selection = {"type": selected_type, "value": selected_value}
+
+    session["timetable_type"] = selected_type
+    session["timetable_value"] = selected_value
 
     save_timetable(saved_master)
 
@@ -1218,53 +1259,6 @@ def _open_browser(host, port):
     webbrowser.open_new(f"http://{browser_host}:{port}/")
 
 
-@app.route("/teacher_portal")
-@login_required
-def teacher_portal():
-    if session.get("role") != "teacher":
-        return redirect(url_for("dashboard"))
-    
-    teacher_id = session.get("teacher_id")
-    from database import get_teacher_availability, get_teacher_records
-    
-    master = load_timetable()
-    teacher_code = ""
-    for tid, tname, tcode in get_teacher_records():
-        if tid == teacher_id:
-            teacher_code = tcode
-            break
-            
-    teacher_entries = get_teacher_view(master, teacher_code) if teacher_code else []
-    availability = get_teacher_availability(teacher_id) if teacher_id else []
-    
-    # transform availability into a map
-    avail_map = {(a["day"], a["slot"]): a["is_available"] for a in availability}
-    
-    # Build grid specifically for teacher portal
-    grid = {}
-    for day in DAYS:
-        grid[day] = []
-        for slot in FULL_SLOTS:
-            if slot in {"BREAK", "LUNCH"}:
-                continue
-            is_avail = avail_map.get((day, slot), True)
-            
-            # Find if there is an entry for this slot
-            entry = next((e for e in teacher_entries if e.get("day") == day and e.get("slot") == slot and not e.get("continuation")), None)
-            
-            grid[day].append({
-                "slot": slot,
-                "is_available": is_avail,
-                "entry": entry
-            })
-    
-    return render_template("teacher_portal.html", 
-        active_page="teacher_portal", 
-        grid=grid,
-        days=DAYS,
-        slots=[s for s in FULL_SLOTS if s not in {"BREAK", "LUNCH"}]
-    )
-
 @app.route("/update_availability", methods=["POST"])
 @login_required
 def update_availability():
@@ -1300,8 +1294,7 @@ def auto_fill_suggestion():
     except ValueError:
         return jsonify({"status": "error", "message": "Invalid subject_id"}), 400
 
-    from database import get_subjects
-    from scheduler import FULL_SLOTS, DAYS, get_all_teacher_availability, load_timetable
+    from scheduler import get_all_teacher_availability
     
     subjects = get_subjects()
     subject_info = next((s for s in subjects if s[0] == subject_id), None)
@@ -1364,6 +1357,46 @@ def auto_fill_suggestion():
         return jsonify({"status": "success", "suggestion": chosen})
         
     return jsonify({"status": "error", "message": "No available slots found"}), 404
+
+@app.route("/teacher_register", methods=["GET", "POST"])
+def teacher_register():
+    if request.method == "POST":
+        department = request.form.get("department", "DEFAULT").strip()
+        short_code = request.form.get("short_code", "").strip().upper()
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        
+        from database import connect
+        from werkzeug.security import generate_password_hash
+        conn = connect(department)
+        try:
+            row = conn.execute("SELECT id FROM teachers WHERE short_code = ?", (short_code,)).fetchone()
+            if not row:
+                flash(f"Teacher short code '{short_code}' not found in {department}.", "warning")
+                return redirect(url_for("teacher_register"))
+            teacher_id = row[0]
+            
+            u_row = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+            if u_row:
+                owner_row = conn.execute("SELECT teacher_id FROM users WHERE id = ?", (u_row[0],)).fetchone()
+                if owner_row[0] != teacher_id:
+                    flash("Username already taken. Please choose another.", "warning")
+                    return redirect(url_for("teacher_register"))
+            
+            existing_user = conn.execute("SELECT id FROM users WHERE teacher_id = ?", (teacher_id,)).fetchone()
+            if existing_user:
+                conn.execute("UPDATE users SET username = ?, password_hash = ? WHERE id = ?", 
+                             (username, generate_password_hash(password), existing_user[0]))
+            else:
+                conn.execute("INSERT INTO users (username, password_hash, role, teacher_id) VALUES (?, ?, ?, ?)",
+                             (username, generate_password_hash(password), "teacher", teacher_id))
+            conn.commit()
+            flash("Registration successful. You can now log in.", "success")
+            return redirect(url_for("login"))
+        finally:
+            conn.close()
+            
+    return render_template("teacher_register.html")
 
 if __name__ == "__main__":
     host = _read_host()

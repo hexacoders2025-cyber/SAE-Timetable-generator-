@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Login</title>
+    <title>Teacher Registration</title>
 
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 
@@ -21,7 +21,7 @@
         }
 
         .card {
-            width: min(350px, 100%);
+            width: min(380px, 100%);
             padding: 25px;
             border-radius: 15px;
             background: rgba(255,255,255,0.9);
@@ -29,6 +29,10 @@
 
         .logo {
             width: 100px;
+        }
+
+        .alert-messages {
+            margin-bottom: 15px;
         }
 
         @media (max-width: 576px) {
@@ -54,8 +58,8 @@
 
         <img src="{{ url_for('static', filename='images/logo.png') }}" class="logo mb-3">
 
-        <h3>Login</h3>
-        <p class="text-muted">Timetable System</p>
+        <h3>Teacher Registration</h3>
+        <p class="text-muted">Create your portal credentials</p>
 
         <div class="alert-messages">
             {% with messages = get_flashed_messages(with_categories=true) %}
@@ -70,7 +74,7 @@
             {% endwith %}
         </div>
 
-        <form action="/login" method="POST">
+        <form action="/teacher_register" method="POST">
 
             <select name="department" class="form-select mb-3" required>
                 <option value="" disabled selected>Select Department</option>
@@ -81,13 +85,15 @@
                 <option value="MECHANICAL">Mechanical Engineering</option>
             </select>
 
-            <input name="username" class="form-control mb-3" placeholder="Username" required>
+            <input name="short_code" class="form-control mb-3" placeholder="Teacher Short Code (e.g. MUK)" required>
 
-            <input type="password" name="password" class="form-control mb-3" placeholder="Password" required>
+            <input name="username" class="form-control mb-3" placeholder="Choose Username" required>
 
-            <button class="btn btn-dark w-100 mb-3">Login</button>
+            <input type="password" name="password" class="form-control mb-3" placeholder="Choose Password" required>
+
+            <button class="btn btn-dark w-100 mb-3">Register</button>
             
-            <a href="/teacher_register" class="text-decoration-none" style="font-size: 0.9rem; color: #6b4c3b;">Register as Teacher</a>
+            <a href="/login" class="text-decoration-none" style="font-size: 0.9rem; color: #6b4c3b;">Already have an account? Login here</a>
 
         </form>
 
@@ -96,6 +102,7 @@
 </div>
 
 <script src="{{ url_for('static', filename='js/pwa.js') }}" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
 </body>
 </html>

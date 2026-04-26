@@ -387,7 +387,8 @@
 
         <nav class="sidebar-links">
             <a href="/dashboard" class="{% if active_page == 'dashboard' %}active{% endif %}">Home</a>
-
+            
+            {% if session.get('role') != 'teacher' %}
             <button type="button" class="sidebar-toggle {% if active_page == 'teachers' %}active{% endif %}"
                 id="dataMenuTrigger" aria-expanded="{% if active_page == 'teachers' %}true{% else %}false{% endif %}"
                 onclick="toggleDataMenu()">
@@ -402,6 +403,7 @@
                     class="{% if active_page == 'teachers' and selected_section == 'classes' %}active{% endif %}">Class
                     Data</a>
             </div>
+            {% endif %}
 
             <a href="/timetable" class="{% if active_page == 'timetable' %}active{% endif %}">Timetable</a>
         </nav>

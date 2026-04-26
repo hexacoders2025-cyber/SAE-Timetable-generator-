@@ -993,6 +993,7 @@ def load_timetable():
                     "class": class_name,
                     "subject": subject,
                     "teacher": f"{teacher_name} ({short_code})" if teacher_name else None,
+                    "teacher_code": short_code if short_code else None,
                     "room": room,
                     "type": entry_type,
                     "subject_id": subject_id,
