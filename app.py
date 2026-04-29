@@ -8,6 +8,8 @@ import traceback
 from functools import wraps
 from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for, flash, session
 from werkzeug.security import check_password_hash
+from dotenv import load_dotenv
+from flask_wtf.csrf import CSRFProtect
 from database import get_user_by_username
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
@@ -43,7 +45,9 @@ app = Flask(
     template_folder=str(resource_path("templates")),
     static_folder=str(resource_path("static")),
 )
-app.secret_key = "timetable_super_secret_key"
+load_dotenv()
+app.secret_key = os.environ.get("TIMETABLE_SECRET_KEY", "timetable_super_secret_key")
+csrf = CSRFProtect(app)
 
 # Ensure exceptions are visible in the console even when Flask debug is off.
 logging.basicConfig(level=os.environ.get("TIMETABLE_LOG_LEVEL", "INFO").upper())
@@ -88,12 +92,7 @@ SLOT_HEADERS = [
 ]
 SLOT_HEADER_MAP = {column["slot"]: column for column in SLOT_HEADERS}
 
-# In-memory cache for the most recently generated / edited timetable in this server process.
-# These are intentionally process-local; persistence is handled by `save_timetable`.
-saved_master = None
-saved_view_entries = []
-saved_grid = None
-saved_selection = {"type": "", "value": ""}
+# Session state is used for the current view instead of global variables.
 
 
 def login_required(f):
@@ -750,19 +749,7 @@ def login():
             session["user_id"] = user["id"]
             session["username"] = user["username"]
             session["role"] = user.get("role", "admin")
-            session["teacher_id"] = user.get("teacher_id")
             flash(f"Logged in successfully to {department}.", "success")
-            if session.get("role") == "teacher":
-                teacher_id = session.get("teacher_id")
-                from database import get_teacher_records
-                teacher_code = ""
-                if teacher_id:
-                    for tid, tname, tcode in get_teacher_records():
-                        if tid == teacher_id:
-                            teacher_code = tcode
-                            break
-                session["teacher_code"] = teacher_code
-                return redirect(url_for("timetable"))
             return redirect(url_for("dashboard"))
         
         flash("Invalid username, password, or department.", "warning")
@@ -923,14 +910,8 @@ def seed_demo_data_route():
 @app.route("/timetable")
 @login_required
 def timetable():
-    if session.get("role") == "teacher":
-        selected_type = "teacher"
-        selected_value = session.get("teacher_code")
-        session["timetable_type"] = selected_type
-        session["timetable_value"] = selected_value
-    else:
-        selected_type = session.get("timetable_type", "")
-        selected_value = session.get("timetable_value", "")
+    selected_type = session.get("timetable_type", "")
+    selected_value = session.get("timetable_value", "")
 
     master = load_timetable()
     timetable_grid = None
@@ -941,12 +922,6 @@ def timetable():
             filtered_entries = get_student_view(master, selected_value)
         elif selected_type == "teacher":
             filtered_entries = get_teacher_view(master, selected_value)
-            if session.get("role") == "teacher":
-                from database import get_teacher_availability
-                teacher_id = session.get("teacher_id")
-                if teacher_id:
-                    availability_data = get_teacher_availability(teacher_id)
-                    teacher_availability = {(a["day"], a["slot"]): a["is_available"] for a in availability_data}
         else:
             filtered_entries = get_room_view(master, selected_value)
         
@@ -966,11 +941,6 @@ def timetable():
 @app.route("/generate")
 @login_required
 def generate():
-    global saved_master
-    global saved_view_entries
-    global saved_grid
-    global saved_selection
-
     selected_type = request.args.get("type", "").strip()
     selected_value = request.args.get("value", "").strip()
 
@@ -978,24 +948,21 @@ def generate():
         return render_template(
             "timetable.html",
             **_timetable_context(
-                timetable=saved_grid,
+                timetable=None,
                 error="Please select a valid timetable filter first.",
                 selected_type=selected_type,
                 selected_value=selected_value,
             ),
         )
 
-    if saved_master is None:
-        saved_master = load_timetable()
-
+    master = load_timetable()
     force_regenerate = request.args.get("force", "false").lower() == "true"
     generated_new_master = False
 
-    if not saved_master or force_regenerate:
+    if not master or force_regenerate:
         master = generate_master()
         generated_new_master = True
     else:
-        master = saved_master
         if selected_type == "student" and master and not any(entry.get("class") == selected_value for entry in master):
             master = generate_master()
             generated_new_master = True
@@ -1020,11 +987,6 @@ def generate():
 
     timetable_grid = _build_timetable_grid(filtered_entries, selected_type)
 
-    saved_master = master
-    saved_view_entries = filtered_entries
-    saved_grid = timetable_grid
-    saved_selection = {"type": selected_type, "value": selected_value}
-
     session["timetable_type"] = selected_type
     session["timetable_value"] = selected_value
 
@@ -1044,11 +1006,6 @@ def generate():
 @app.route("/save_timetable_edits", methods=["POST"])
 @login_required
 def save_timetable_edits():
-    global saved_master
-    global saved_view_entries
-    global saved_grid
-    global saved_selection
-
     payload = request.get_json(silent=True) or {}
     selected_type = str(payload.get("selected_type") or "").strip()
     selected_value = str(payload.get("selected_value") or "").strip()
@@ -1057,19 +1014,14 @@ def save_timetable_edits():
     if selected_type != "student" or not selected_value:
         return jsonify({"ok": False, "message": "Manual editing is available for student timetables only."}), 400
 
-    if saved_master is None:
-        saved_master = load_timetable()
-
+    master = load_timetable()
     manual_entries = _build_manual_entries(selected_value, cells)
-    saved_master = _merge_class_entries(saved_master, selected_value, manual_entries)
-    saved_view_entries = get_student_view(saved_master, selected_value)
-    saved_grid = _build_timetable_grid(saved_view_entries, selected_type)
-    saved_selection = {"type": selected_type, "value": selected_value}
+    master = _merge_class_entries(master, selected_value, manual_entries)
 
     session["timetable_type"] = selected_type
     session["timetable_value"] = selected_value
 
-    save_timetable(saved_master)
+    save_timetable(master)
 
     return jsonify({"ok": True, "redirect": url_for("timetable")})
 
@@ -1077,6 +1029,21 @@ def save_timetable_edits():
 @app.route("/download")
 @login_required
 def download():
+    selected_type = session.get("timetable_type", "")
+    selected_value = session.get("timetable_value", "")
+    
+    if not selected_value:
+        return redirect(url_for("timetable"))
+        
+    master = load_timetable()
+    
+    if selected_type == "student":
+        saved_view_entries = get_student_view(master, selected_value)
+    elif selected_type == "teacher":
+        saved_view_entries = get_teacher_view(master, selected_value)
+    else:
+        saved_view_entries = get_room_view(master, selected_value)
+
     if not saved_view_entries:
         return redirect(url_for("timetable"))
 
@@ -1134,7 +1101,7 @@ def download():
                 row[column_index] = ""
                 continue
 
-            row[column_index] = _slot_cell_text(entry, saved_selection["type"])
+            row[column_index] = _slot_cell_text(entry, selected_type)
             span = int(entry.get("span", 1) or 1)
             if span > 1:
                 span_commands.append(("SPAN", (column_index, row_index), (column_index + span - 1, row_index)))
@@ -1166,12 +1133,12 @@ def download():
     )
 
     elements = [
-        Paragraph(_pdf_heading(saved_selection["type"], saved_selection["value"]), title_style),
+        Paragraph(_pdf_heading(selected_type, selected_value), title_style),
         Spacer(1, 18),
         timetable_table,
     ]
 
-    if saved_selection["type"] == "student":
+    if selected_type == "student":
         teacher_rows = _teacher_details_rows(saved_view_entries)
         if teacher_rows:
             teacher_table = Table(
@@ -1204,7 +1171,7 @@ def download():
 
     document.build(elements)
 
-    download_name = f"timetable-{saved_selection['value'] or 'view'}.pdf"
+    download_name = f"timetable-{selected_value or 'view'}.pdf"
     return send_file(str(PDF_PATH), as_attachment=True, download_name=download_name)
 
 
@@ -1259,144 +1226,7 @@ def _open_browser(host, port):
     webbrowser.open_new(f"http://{browser_host}:{port}/")
 
 
-@app.route("/update_availability", methods=["POST"])
-@login_required
-def update_availability():
-    if session.get("role") != "teacher":
-        return jsonify({"status": "error", "message": "Unauthorized"}), 403
-        
-    teacher_id = session.get("teacher_id")
-    if not teacher_id:
-        return jsonify({"status": "error", "message": "Teacher profile not linked"}), 400
-        
-    from database import set_teacher_availability
-    data = request.json
-    try:
-        set_teacher_availability(teacher_id, data["day"], data["slot"], data["is_available"])
-        return jsonify({"status": "success"})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route("/auto_fill_suggestion", methods=["POST"])
-@login_required
-def auto_fill_suggestion():
-    data = request.json
-    class_name = data.get("class_name")
-    subject_id = data.get("subject_id")
-    duration = data.get("duration", 1)
-    cells = data.get("current_cells", [])
-    
-    if not class_name or not subject_id:
-        return jsonify({"status": "error", "message": "Missing parameters"}), 400
-        
-    try:
-        subject_id = int(subject_id)
-    except ValueError:
-        return jsonify({"status": "error", "message": "Invalid subject_id"}), 400
-
-    from scheduler import get_all_teacher_availability
-    
-    subjects = get_subjects()
-    subject_info = next((s for s in subjects if s[0] == subject_id), None)
-    if not subject_info:
-        return jsonify({"status": "error", "message": "Subject not found"}), 404
-        
-    teacher_id = subject_info[8]
-    availability = get_all_teacher_availability()
-    
-    occupied_class_slots = set()
-    for c in cells:
-        if c.get("subject_id"):
-            occupied_class_slots.add((c["day"], c["slot"]))
-            
-    master = load_timetable()
-    teacher_busy = set()
-    for entry in master:
-        if entry.get("teacher_id") == teacher_id and entry.get("class") != class_name and entry.get("type") not in {"free", "break"}:
-            teacher_busy.add((entry["day"], entry["slot"]))
-
-    candidates = []
-    for day in DAYS:
-        for i in range(len(FULL_SLOTS)):
-            slot = FULL_SLOTS[i]
-            if slot in {"BREAK", "LUNCH"}:
-                continue
-                
-            valid = True
-            slots_to_check = []
-            for offset in range(duration):
-                if i + offset >= len(FULL_SLOTS):
-                    valid = False
-                    break
-                check_slot = FULL_SLOTS[i + offset]
-                if check_slot in {"BREAK", "LUNCH"}:
-                    valid = False
-                    break
-                slots_to_check.append(check_slot)
-                
-            if not valid:
-                continue
-                
-            for s in slots_to_check:
-                if (day, s) in occupied_class_slots:
-                    valid = False
-                    break
-                if (day, s) in teacher_busy:
-                    valid = False
-                    break
-                if not availability.get((teacher_id, day, s), True):
-                    valid = False
-                    break
-                    
-            if valid:
-                candidates.append({"day": day, "slot": slot})
-                
-    if candidates:
-        import random
-        chosen = random.choice(candidates)
-        return jsonify({"status": "success", "suggestion": chosen})
-        
-    return jsonify({"status": "error", "message": "No available slots found"}), 404
-
-@app.route("/teacher_register", methods=["GET", "POST"])
-def teacher_register():
-    if request.method == "POST":
-        department = request.form.get("department", "DEFAULT").strip()
-        short_code = request.form.get("short_code", "").strip().upper()
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
-        
-        from database import connect
-        from werkzeug.security import generate_password_hash
-        conn = connect(department)
-        try:
-            row = conn.execute("SELECT id FROM teachers WHERE short_code = ?", (short_code,)).fetchone()
-            if not row:
-                flash(f"Teacher short code '{short_code}' not found in {department}.", "warning")
-                return redirect(url_for("teacher_register"))
-            teacher_id = row[0]
-            
-            u_row = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
-            if u_row:
-                owner_row = conn.execute("SELECT teacher_id FROM users WHERE id = ?", (u_row[0],)).fetchone()
-                if owner_row[0] != teacher_id:
-                    flash("Username already taken. Please choose another.", "warning")
-                    return redirect(url_for("teacher_register"))
-            
-            existing_user = conn.execute("SELECT id FROM users WHERE teacher_id = ?", (teacher_id,)).fetchone()
-            if existing_user:
-                conn.execute("UPDATE users SET username = ?, password_hash = ? WHERE id = ?", 
-                             (username, generate_password_hash(password), existing_user[0]))
-            else:
-                conn.execute("INSERT INTO users (username, password_hash, role, teacher_id) VALUES (?, ?, ?, ?)",
-                             (username, generate_password_hash(password), "teacher", teacher_id))
-            conn.commit()
-            flash("Registration successful. You can now log in.", "success")
-            return redirect(url_for("login"))
-        finally:
-            conn.close()
-            
-    return render_template("teacher_register.html")
 
 if __name__ == "__main__":
     host = _read_host()

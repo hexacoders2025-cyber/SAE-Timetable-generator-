@@ -71,6 +71,7 @@
         </div>
 
         <form action="/login" method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 
             <select name="department" class="form-select mb-3" required>
                 <option value="" disabled selected>Select Department</option>
@@ -86,8 +87,6 @@
             <input type="password" name="password" class="form-control mb-3" placeholder="Password" required>
 
             <button class="btn btn-dark w-100 mb-3">Login</button>
-            
-            <a href="/teacher_register" class="text-decoration-none" style="font-size: 0.9rem; color: #6b4c3b;">Register as Teacher</a>
 
         </form>
 

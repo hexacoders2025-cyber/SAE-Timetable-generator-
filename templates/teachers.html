@@ -16,6 +16,7 @@
     <div class="section-subtitle">Each row links one teacher to one subject, class, and session type.</div>
 
     <form action="/add_teacher" method="POST" class="row g-3" id="teacherForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="hidden" name="assignment_id" id="teacher_assignment_id">
 
         <div class="col-md-3">
@@ -111,6 +112,7 @@
     <div class="section-subtitle">Map each class (year + division + type) to its preferred room for timetable generation.</div>
 
     <form action="/save_class_section" method="POST" class="row g-3" id="sectionForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="hidden" name="section_id" id="section_id">
 
         <div class="col-md-3">

@@ -8,7 +8,6 @@
 <div class="card p-4">
     <h3>{{ page_heading }}</h3>
 
-    {% if session.get('role') != 'teacher' %}
     <div class="row mb-3 filter-row">
         <div class="col-md-3">
             <select id="type" class="form-control">
@@ -25,18 +24,13 @@
             </select>
         </div>
     </div>
-    {% endif %}
 
     <div class="mb-3 toolbar-row">
-        {% if session.get('role') != 'teacher' %}
         <button onclick="viewTimetable()" class="btn btn-brown"><i class="fa-solid fa-eye"></i> View</button>
         <button onclick="regenerateTimetable()" class="btn btn-danger" title="Overwrite current timetable and regenerate"><i class="fa-solid fa-rotate"></i> Regenerate All</button>
-        {% endif %}
         <button onclick="downloadPDF()" class="btn btn-dark" {% if not has_timetable %}disabled{% endif %}><i class="fa-solid fa-file-pdf"></i> Download PDF</button>
         <button onclick="shareToWhatsApp()" class="btn btn-success" {% if not has_timetable %}disabled title="Generate a student timetable first"{% endif %}><i class="fa-brands fa-whatsapp"></i> Share on WhatsApp</button>
-        {% if session.get('role') != 'teacher' %}
         <button onclick="toggleEditPanel()" class="btn btn-warning" id="editBtn"><i class="fa-solid fa-pen"></i> Edit</button>
-        {% endif %}
     </div>
 
     {% if error %}
@@ -66,7 +60,6 @@
         </div>
 
         <div class="editor-actions">
-            <button onclick="smartAutoFill()" class="btn btn-primary" id="autoFillBtn"><i class="fa-solid fa-wand-magic-sparkles"></i> Smart Auto-Fill</button>
             <button onclick="saveEdits()" class="btn btn-success">Save</button>
             <button onclick="closeEditPanel()" class="btn btn-secondary">Close</button>
         </div>
@@ -88,28 +81,21 @@
                 <tr>
                     <td>{{ day }}</td>
                     {% for cell in grid[day] %}
-                    {% set is_teacher = session.get('role') == 'teacher' %}
-                    {% set is_available = teacher_availability.get((day, cell.slot), True) if is_teacher else True %}
                     <td
-                        class="{% if not cell.editable %}break{% else %}editable-cell{% endif %} {% if is_teacher and cell.editable %}{% if is_available %}avail-true{% else %}avail-false{% endif %} teacher-slot{% endif %}"
+                        class="{% if not cell.editable %}break{% else %}editable-cell{% endif %}"
                         data-day="{{ day }}"
                         data-slot="{{ cell.slot }}"
                         data-editable="{{ 'true' if cell.editable else 'false' }}"
                         data-subject-id="{{ cell.subject_id }}"
                         data-room="{{ cell.room }}"
                         data-entry-type="{{ cell.entry_type }}"
-                        {% if is_teacher and cell.editable %}onclick="toggleTeacherAvailability(this)"{% endif %}
                     >
-                        {% if is_teacher and cell.editable and not cell.subject and not cell.subject_id %}
-                            <div class="free-slot-indicator"><i class="fa-solid fa-circle-check" style="color: {% if is_available %}#4caf50{% else %}#f44336{% endif %}; font-size: 1.5rem; opacity: 0.5;"></i></div>
-                        {% else %}
-                            <div class="cell-subject">{{ cell.subject }}</div>
-                            {% if cell.code %}
-                            <div class="cell-code">{{ cell.code }}</div>
-                            {% endif %}
-                            {% if cell.room %}
-                            <div class="cell-room">{{ cell.room }}</div>
-                            {% endif %}
+                        <div class="cell-subject">{{ cell.subject }}</div>
+                        {% if cell.code %}
+                        <div class="cell-code">{{ cell.code }}</div>
+                        {% endif %}
+                        {% if cell.room %}
+                        <div class="cell-room">{{ cell.room }}</div>
                         {% endif %}
                     </td>
                     {% endfor %}
@@ -477,7 +463,6 @@ subjectCards.forEach(function (card) {
         resetCardSelection();
 
         if (alreadyActive) {
-            document.getElementById("autoFillBtn").classList.add("disabled");
             return;
         }
 
@@ -490,7 +475,6 @@ subjectCards.forEach(function (card) {
             entryType: card.dataset.entryType || "lec",
             duration: Number(card.dataset.duration || "1")
         };
-        document.getElementById("autoFillBtn").classList.remove("disabled");
     });
 });
 
@@ -539,9 +523,13 @@ async function saveEdits() {
         };
     });
 
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
     const response = await fetch("/save_timetable_edits", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+            "Content-Type": "application/json",
+            "X-CSRFToken": csrfToken
+        },
         body: JSON.stringify({
             selected_type: "student",
             selected_value: optionSelect.value,
@@ -558,61 +546,6 @@ async function saveEdits() {
     window.location.href = data.redirect;
 }
 
-async function smartAutoFill() {
-    if (!activeCard) return;
-    if (!loadedStudentSelection()) return;
-
-    const cells = editableCells.map(function (cell) {
-        return {
-            day: cell.dataset.day,
-            slot: cell.dataset.slot,
-            subject_id: cell.dataset.subjectId || "",
-            room: cell.dataset.room || ""
-        };
-    });
-
-    const autoFillBtn = document.getElementById("autoFillBtn");
-    autoFillBtn.disabled = true;
-    autoFillBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Thinking...';
-
-    try {
-        const response = await fetch("/auto_fill_suggestion", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                class_name: optionSelect.value,
-                subject_id: activeCard.subjectId,
-                duration: activeCard.duration,
-                current_cells: cells
-            })
-        });
-
-        const data = await response.json();
-        if (data.status === "success" && data.suggestion) {
-            const startCell = cellMap.get(`${data.suggestion.day}|${data.suggestion.slot}`);
-            if (startCell) {
-                const placementCells = getPlacementCells(startCell, activeCard.duration);
-                if (placementCells) {
-                    placementCells.forEach(function (placementCell) {
-                        setCellContent(placementCell, activeCard);
-                    });
-                    // Visual feedback
-                    startCell.classList.add("selected-cell");
-                    setTimeout(() => startCell.classList.remove("selected-cell"), 2000);
-                } else {
-                    alert("Suggested slot could not be placed due to duration bounds.");
-                }
-            }
-        } else {
-            alert(data.message || "No valid non-conflicting slot found for this teacher and class.");
-        }
-    } catch (err) {
-        alert("Error during auto-fill: " + err.message);
-    } finally {
-        autoFillBtn.disabled = false;
-        autoFillBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Smart Auto-Fill';
-    }
-}
 
 function shareToWhatsApp() {
     const classVal = optionSelect.value || "All Classes";
@@ -672,49 +605,6 @@ if (selectedType) {
 
 populateOptions();
 
-async function toggleTeacherAvailability(cell) {
-    if (cell.dataset.subjectId || cell.querySelector('.cell-subject')) return;
-    
-    const day = cell.dataset.day;
-    const slot = cell.dataset.slot;
-    const isCurrentlyAvailable = cell.classList.contains('avail-true');
-    const newAvailability = !isCurrentlyAvailable;
-    
-    const icon = cell.querySelector('.fa-circle-check');
-    if (icon) {
-        icon.style.color = newAvailability ? '#4caf50' : '#f44336';
-    }
-    
-    cell.classList.remove('avail-true', 'avail-false');
-    cell.classList.add(newAvailability ? 'avail-true' : 'avail-false');
 
-    try {
-        const response = await fetch('/update_availability', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                day: day,
-                slot: slot,
-                is_available: newAvailability
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error('Failed to update');
-        }
-    } catch (error) {
-        console.error('Error updating availability:', error);
-        alert('Failed to save availability. Please try again.');
-        
-        // Revert UI on failure
-        if (icon) {
-            icon.style.color = isCurrentlyAvailable ? '#4caf50' : '#f44336';
-        }
-        cell.classList.remove('avail-true', 'avail-false');
-        cell.classList.add(isCurrentlyAvailable ? 'avail-true' : 'avail-false');
-    }
-}
 </script>
 {% endblock %}
